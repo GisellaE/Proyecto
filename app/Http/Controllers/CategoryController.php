@@ -4,17 +4,26 @@ namespace App\Http\Controllers;
 
 use App\Models\Category;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
+use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class CategoryController extends Controller
 {
     public function index()
     {
+        $categories = Category::withCount('products')->get();
+
+        $categories->transform(function ($category) {
+            if ($category->image) {
+                $category->image_url = asset('storage/' . $category->image);
+            }
+            return $category;
+        });
+
         return Inertia::render('Categories/Index', [
-            'categories' => Category::orderBy('priority')->get(),
+            'categories' => $categories,
         ]);
     }
 
@@ -25,84 +34,114 @@ class CategoryController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $request->validate([
             'name' => 'required|string|max:255|unique:categories,name',
             'slug' => 'nullable|string|max:255|unique:categories,slug',
-            'description' => 'nullable|string',
-            'priority' => 'required|integer|min:0',
-            'image' => 'nullable|image|max:2048', // Validación imagen
+            'description' => 'nullable|string|max:1000',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'status' => 'boolean',
         ]);
 
-        if (empty($validated['slug'])) {
-            $validated['slug'] = Str::slug($validated['name']);
-        }
+        $slug = $request->slug ?: Str::slug($request->name);
+        $imagePath = null;
 
-        // Guardar imagen si viene
         if ($request->hasFile('image')) {
-            $validated['image'] = $request->file('image')->store('categories', 'public');
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::slug($request->name) . '.' . $file->getClientOriginalExtension();
+            $imagePath = $file->storeAs('categories', $filename, 'public');
         }
 
-        Category::create($validated);
+        Category::create([
+            'name' => $request->name,
+            'slug' => $slug,
+            'description' => $request->description,
+            'image' => $imagePath,
+            'status' => $request->status ?? true, // por defecto true si no viene
+        ]);
 
-        return redirect()->route('categories.index')->with('success', 'Categoría creada correctamente.');
+        return redirect()->route('categories.index')->with('success', 'Categoría creada correctamente');
     }
 
-    public function edit(Category $category)
+    public function show($slug)
     {
+        $category = Category::where('slug', $slug)->firstOrFail();
+        $products = $category->products()->with('category')->get();
+
+        $products->transform(function ($product) {
+            if ($product->image) {
+                $product->image_url = asset('storage/' . $product->image);
+            }
+            return $product;
+        });
+
+        if ($category->image) {
+            $category->image_url = asset('storage/' . $category->image);
+        }
+
+        return Inertia::render('Categories/Show', [
+            'category' => $category,
+            'products' => $products,
+        ]);
+    }
+
+    public function edit($slug)
+    {
+        $category = Category::where('slug', $slug)->firstOrFail();
+
         return Inertia::render('Categories/Edit', [
             'category' => $category,
         ]);
     }
 
-    public function update(Request $request, Category $category)
+    public function update(Request $request, $slug)
     {
-        $validated = $request->validate([
-            'name' => [
-                'required',
-                'string',
-                'max:255',
-                Rule::unique('categories')->ignore($category->id),
-            ],
-            'slug' => [
-                'nullable',
-                'string',
-                'max:255',
-                Rule::unique('categories')->ignore($category->id),
-            ],
-            'description' => 'nullable|string',
-            'priority' => 'required|integer|min:0',
-            'image' => 'nullable|image|max:2048', // Validación imagen
+        $category = Category::where('slug', $slug)->firstOrFail();
+
+        $request->validate([
+            'name' => ['required', 'string', 'max:255', Rule::unique('categories')->ignore($category->id)],
+            'slug' => ['required', 'string', 'max:255', Rule::unique('categories')->ignore($category->id)],
+            'description' => 'nullable|string|max:1000',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:2048',
+            'status' => 'boolean',
         ]);
 
-        if (empty($validated['slug'])) {
-            $validated['slug'] = Str::slug($validated['name']);
-        }
+        $imagePath = $category->image;
 
-        // Si subieron nueva imagen, borrar la antigua y guardar la nueva
         if ($request->hasFile('image')) {
-            if ($category->image) {
+            if ($category->image && Storage::disk('public')->exists($category->image)) {
                 Storage::disk('public')->delete($category->image);
             }
-            $validated['image'] = $request->file('image')->store('categories', 'public');
-        } else {
-            // Si no enviaron imagen nueva, conservar la anterior
-            $validated['image'] = $category->image;
+
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::slug($request->name) . '.' . $file->getClientOriginalExtension();
+            $imagePath = $file->storeAs('categories', $filename, 'public');
         }
 
-        $category->update($validated);
+        $category->update([
+            'name' => $request->name,
+            'slug' => $request->slug,
+            'description' => $request->description,
+            'image' => $imagePath,
+            'status' => $request->status ?? true,
+        ]);
 
-        return redirect()->route('categories.index')->with('success', 'Categoría actualizada correctamente.');
+        return redirect()->route('categories.index')->with('success', 'Categoría actualizada correctamente');
     }
 
-    public function destroy(Category $category)
+    public function destroy($slug)
     {
-        // Borrar imagen si existe
-        if ($category->image) {
+        $category = Category::where('slug', $slug)->firstOrFail();
+
+        if ($category->products()->count() > 0) {
+            return redirect()->route('categories.index')->with('error', 'No se puede eliminar la categoría porque tiene productos asociados.');
+        }
+
+        if ($category->image && Storage::disk('public')->exists($category->image)) {
             Storage::disk('public')->delete($category->image);
         }
 
         $category->delete();
 
-        return redirect()->route('categories.index')->with('success', 'Categoría eliminada.');
+        return redirect()->route('categories.index')->with('success', 'Categoría eliminada correctamente');
     }
 }

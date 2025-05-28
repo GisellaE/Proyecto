@@ -15,14 +15,17 @@ class ProductController extends Controller
     // Mostrar lista de productos (con paginación)
     public function index()
     {
-        // Obtenemos los productos con sus categorías, paginados
-        $products = Product::with('category')->paginate(10);
+        // Obtenemos los productos con sus categorías
+        $products = Product::with('category')->get();
+
+        // Obtenemos todas las categorías para los filtros
+        $categories = Category::all();
 
         // Modificar los productos para agregar la URL completa de la imagen en el campo 'image'
-        $products->getCollection()->transform(function ($product) {
+        // Transformar productos para incluir URL de imagen
+        $products->transform(function ($product) {
             if ($product->image) {
-                // Reemplazamos la ruta de 'image' con la URL completa
-                $product->image = asset('storage/' . $product->image);
+                $product->image_url = asset('storage/' . $product->image);
             }
             return $product;
         });
@@ -30,6 +33,7 @@ class ProductController extends Controller
         // Retornar los productos a la vista de Inertia
         return Inertia::render('Products/Index', [
             'products' => $products,
+            'categories' => $categories,
         ]);
     }
 
@@ -65,7 +69,9 @@ class ProductController extends Controller
         // Subir la imagen si se proporciona
         $imagePath = null;
         if ($request->hasFile('image')) {
-            $imagePath = $request->file('image')->store('products', 'public');
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::slug($request->name) . '.' . $file->getClientOriginalExtension();
+            $imagePath = $file->storeAs('products', $filename, 'public');
         }
 
         // Crear el nuevo producto en la base de datos
@@ -89,9 +95,28 @@ class ProductController extends Controller
     {
         $product = Product::with('category')->where('slug', $slug)->firstOrFail();
 
-        // Devolver los detalles del producto a la vista de Inertia
+        // Agregar URL de imagen
+        if ($product->image) {
+            $product->image_url = asset('storage/' . $product->image);
+        }
+
+        // Productos relacionados (misma categoría)
+        $relatedProducts = Product::with('category')
+            ->where('category_id', $product->category_id)
+            ->where('id', '!=', $product->id)
+            ->limit(4)
+            ->get();
+
+        $relatedProducts->transform(function ($product) {
+            if ($product->image) {
+                $product->image_url = asset('storage/' . $product->image);
+            }
+            return $product;
+        });
+
         return Inertia::render('Products/Show', [
             'product' => $product,
+            'relatedProducts' => $relatedProducts,
         ]);
     }
 
@@ -138,11 +163,13 @@ class ProductController extends Controller
 
         // Subir la nueva imagen si se proporciona
         if ($request->hasFile('image')) {
-            // Si el producto tiene una imagen, eliminamos la antigua
-            if ($product->image) {
+            if ($product->image && Storage::disk('public')->exists($product->image)) {
                 Storage::disk('public')->delete($product->image);
             }
-            $imagePath = $request->file('image')->store('products', 'public');
+
+            $file = $request->file('image');
+            $filename = time() . '_' . Str::slug($request->name) . '.' . $file->getClientOriginalExtension();
+            $imagePath = $file->storeAs('products', $filename, 'public');
         }
 
         // Actualizar los datos del producto

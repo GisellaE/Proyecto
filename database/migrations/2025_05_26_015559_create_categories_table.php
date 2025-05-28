@@ -17,6 +17,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->integer('priority')->default(0);
             $table->string('slug')->unique();
+            $table->boolean('status')->default(true); // Ruta de la imagen de la categoría
             $table->timestamps();
         });
     }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+
 return [
 
     /*
@@ -123,4 +125,17 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    'providers' => AppServiceProvider::defaultProviders()->merge([
+        /*
+     * Package Service Providers...
+     */
+
+        /*
+     * Application Service Providers...
+     */
+        App\Providers\AppServiceProvider::class,
+        App\Providers\FortifyServiceProvider::class,
+        App\Providers\JetstreamServiceProvider::class,
+        App\Providers\RouteServiceProvider::class,
+    ])->toArray(),
 ];
